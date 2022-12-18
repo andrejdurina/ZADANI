@@ -1,0 +1,84 @@
+% Detekcia salok vyuzitim Faster R-CNN neuronovej siete
+% Forintova, Durina
+
+clc;clear;close all;
+
+%% Load dataset and split data
+
+%First column contains the image file paths and the second column contains the vehicle bounding boxes.
+
+load("cupDataset.mat"); 
+
+%Rozdelenie dat na trenovacie, testovacie a validacne.
+
+trainDataParts = 0.6;
+valDataParts = 0.1;
+
+rng(0)
+shuffledIndices = randperm(height(cupDataset));
+idx = floor(trainDataParts * height(cupDataset));
+
+trainingIdx = 1:idx;
+trainingDataTbl = cupDataset(shuffledIndices(trainingIdx),:);
+
+validationIdx = idx+1 : idx + 1 + floor(valDataParts * length(shuffledIndices) );
+validationDataTbl = cupDataset(shuffledIndices(validationIdx),:);
+
+testIdx = validationIdx(end)+1 : length(shuffledIndices);
+testDataTbl = cupDataset(shuffledIndices(testIdx),:);
+
+%Creating datastores for loading the image and label data during training and evaluation.
+
+imdsTrain = imageDatastore(trainingDataTbl{:,'cupImagename'});
+bldsTrain = boxLabelDatastore(trainingDataTbl(:,'cup'));
+
+imdsValidation = imageDatastore(validationDataTbl{:,'cupImagename'});
+bldsValidation = boxLabelDatastore(validationDataTbl(:,'cup'));
+
+imdsTest = imageDatastore(testDataTbl{:,'cupImagename'});
+bldsTest = boxLabelDatastore(testDataTbl(:,'cup'));
+
+% Combine image and box label datastores.
+
+trainingData = combine(imdsTrain,bldsTrain);
+validationData = combine(imdsValidation,bldsValidation);
+testData = combine(imdsTest,bldsTest);
+
+% Display one of the training images and box labels.
+
+data = read(trainingData);
+I = data{1};
+bbox = data{2};
+annotatedImage = insertShape(I,'rectangle',bbox);
+annotatedImage = imresize(annotatedImage,2);
+figure
+imshow(annotatedImage)
+
+%% Create Faster R-CNN Detection Network
+
+inputSize = [224 224 3];
+preprocessedTrainingData = transform(trainingData, @(data)preprocessData(data,inputSize));
+numAnchors = 3;
+anchorBoxes = estimateAnchorBoxes(preprocessedTrainingData ,numAnchors);
+
+%% Load pretrained Resnet-50 Neural Network
+
+featureExtractionNetwork = resnet50;
+featureLayer = 'activation_40_relu'; % Select 'activation_40_relu' as the feature extraction layer.
+% analyzeNetwork(featureExtractionNetwork)
+numClasses = width(cupDataset)-1;
+
+lgraph = fasterRCNNLayers(inputSize,numClasses,anchorBoxes,featureExtractionNetwork,featureLayer);
+
+%% Data Augmentation
+
+augmentedTrainingData = transform(trainingData,@augmentData);
+
+augmentedData = cell(4,1);
+for k = 1:4
+    data = read(augmentedTrainingData);
+    augmentedData{k} = insertShape(data{1},'rectangle',data{2});
+    reset(augmentedTrainingData);
+end
+figure
+montage(augmentedData,'BorderSize',10)
